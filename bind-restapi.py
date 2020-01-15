@@ -93,9 +93,13 @@ class ValidationMixin():
 class MainHandler(ValidationMixin, JsonHandler):
 
     def _nsupdate(self, update):
-        cmd = '{0} -k {1}'.format(options.nsupdate_command, options.sig_key)
+        #cmd = '{0} -k {1}'.format(options.nsupdate_command, options.sig_key)
+        cmd = '{0}'.format(options.nsupdate_command)
+        print("CMD: {}".format(cmd))
         p = Popen(shlex.split(cmd), stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-        stdout = p.communicate(input=update)[0]
+        print("Update type:")
+        print(type(update))
+        stdout = p.communicate(input=update.encode())[0]
         return p.returncode, stdout.decode()
 
     @auth
@@ -124,6 +128,8 @@ class MainHandler(ValidationMixin, JsonHandler):
                 hostname)
             update += '\n' + ptr_update
 
+        print("Update string:")
+        print(update)
         return_code, stdout = self._nsupdate(update)
         if return_code != 0:
             self.send_error(500, message=stdout)
@@ -164,19 +170,19 @@ if __name__ == '__main__':
 
     if len(sys.argv) == 2:
         if 'start' == sys.argv[1]:
-            print 'Starting tornado...'
+            print('Starting tornado...')
             daemon.start()
         elif 'stop' == sys.argv[1]:
-            print 'Stopping tornado...'
+            print('Stopping tornado...')
             daemon.stop()
         elif 'restart' == sys.argv[1]:
-            print 'Restarting tornado...'
+            print('Restarting tornado...')
             daemon.restart()
         else:
-            print 'Unknown command'
+            print('Unknown command')
             sys.exit(2)
         sys.exit()
     else:
-        print 'Usage: %s start|stop|restart' % sys.argv[0]
+        print(('Usage: %s start|stop|restart' % sys.argv[0]))
         sys.exit(2)
 
