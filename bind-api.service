@@ -1,0 +1,11 @@
+[Unit]
+
+Description=RESTful wrapper for nsupdate
+Wants=network.service
+After=network.service
+
+[Service]
+
+Type=simple
+Execstart=/usr/bin/python3 /software/bind-restapi/bind-restapi.py
+Restart=always

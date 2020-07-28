@@ -1,12 +1,11 @@
-from tornado.ioloop import IOLoop
-import tornado.web
 import json
-from tornado.options import define, options
 import os
 import sys
-import daemon
-from subprocess import Popen, PIPE, STDOUT
 import shlex
+from tornado.ioloop import IOLoop
+from tornado.web import url, RequestHandler, Application
+from tornado.options import define, options
+from subprocess import Popen, PIPE, STDOUT
 
 # curl -X DELETE -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com"}' http://localhost:9999/dns
 # curl -X POST -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com", "ip": "1.1.1.10" }' http://localhost:9999/dns
@@ -14,9 +13,9 @@ import shlex
 
 cwd = os.path.dirname(os.path.realpath(__file__))
 
+# Defines CLI options for the entire module
 define('address', default='0.0.0.0', type=str, help='Listen on interface')
 define('port', default=9999, type=int, help='Listen on port')
-define('pidfile', default=os.path.join(cwd, 'bind-restapi.pid'), type=str, help='PID location')
 define('logfile', default=os.path.join(cwd, 'bind-restapi.log'), type=str, help='Log file')
 define('ttl', default='8640', type=int, help='Default TTL')
 define('nameserver', default='127.0.0.1', type=str, help='Master DNS')
@@ -46,6 +45,9 @@ send\
 
 
 def auth(func):
+    """
+    Decorator to check headers for API key and authorized incoming requests
+    """
     def header_check(self, *args, **kwargs):
         secret_header = self.request.headers.get('X-Api-Key', None)
         if not secret_header or not options.secret == secret_header:
@@ -59,10 +61,18 @@ def reverse_ip(ip):
     return '.'.join(reversed(ip.split('.'))) + ".in-addr.arpa"
 
 
-class JsonHandler(tornado.web.RequestHandler):
+class JsonHandler(RequestHandler):
+    """
+    Request handler where requests and responses speak JSON.
+    """
 
-    """Request handler where requests and responses speak JSON."""
     def prepare(self):
+        """
+        Prepares incoming requests before they hit the request handling functions (get,
+        put, post, delete, etc).
+
+        Called immediately after initialize
+        """
         # Incorporate request JSON into arguments dictionary.
         if self.request.body:
             try:
@@ -76,6 +86,10 @@ class JsonHandler(tornado.web.RequestHandler):
         self.set_header('Content-Type', 'application/json')
 
     def write_error(self, status_code, **kwargs):
+        """
+        Convenience function for returning error responses to incoming requests 
+        """
+
         reason = self._reason
         if 'message' in kwargs:
             reason = kwargs['message']
@@ -84,7 +98,25 @@ class JsonHandler(tornado.web.RequestHandler):
 
 
 class ValidationMixin():
+    """
+    Simple mixin class that provides validation of request parameters
+    """
+
     def validate_params(self, params):
+        """
+        Checks request for list of required parameters by name
+
+        Parameters
+        ----------
+
+        params : list
+            List of parameters that must be present in request.arguments
+
+        Returns
+        -------
+
+        Sends error response if required parameter is not found
+        """
         for parameter in params:
             if parameter not in self.request.arguments:
                 self.send_error(400, message='Parameter %s not found' % parameter)
@@ -93,6 +125,9 @@ class ValidationMixin():
 class MainHandler(ValidationMixin, JsonHandler):
 
     def _nsupdate(self, update):
+        """
+        Runs nsupdate command `update` in a suprocess
+        """
         #cmd = '{0} -k {1}'.format(options.nsupdate_command, options.sig_key)
         cmd = '{0}'.format(options.nsupdate_command)
         print("CMD: {}".format(cmd))
@@ -150,39 +185,26 @@ class MainHandler(ValidationMixin, JsonHandler):
         self.send_error(200, message='Record deleted')
 
 
-class Application(tornado.web.Application):
+class DNSApplication(Application):
     def __init__(self):
+        # (regex for matching route, RequestHandler object, args for RequestHandler.initialize)
         handlers = [
-            (r"/dns", MainHandler)
+            url(r"/dns", MainHandler)
         ]
-        tornado.web.Application.__init__(self, handlers)
+        Application.__init__(self, handlers)
 
 
-class TornadoDaemon(daemon.Daemon):
-    def run(self):
-        while True:
-            app = Application()
-            app.listen(options.port, options.address)
-            IOLoop.instance().start()
+def main():
+    app = DNSApplication()
+    app.listen(options.port, options.address)
+    IOLoop.instance().start()
+
+    # Multiple processes
+    # app = DNSApplication()
+    # server = tornado.httpserver.HTTPServer(app)
+    # server.bind(8888)
+    # server.start(0)  # forks one process per cpu
+    # IOLoop.current().start()
 
 if __name__ == '__main__':
-    daemon = TornadoDaemon(options.pidfile, stdout=options.logfile, stderr=options.logfile)
-
-    if len(sys.argv) == 2:
-        if 'start' == sys.argv[1]:
-            print('Starting tornado...')
-            daemon.start()
-        elif 'stop' == sys.argv[1]:
-            print('Stopping tornado...')
-            daemon.stop()
-        elif 'restart' == sys.argv[1]:
-            print('Restarting tornado...')
-            daemon.restart()
-        else:
-            print('Unknown command')
-            sys.exit(2)
-        sys.exit()
-    else:
-        print(('Usage: %s start|stop|restart' % sys.argv[0]))
-        sys.exit(2)
-
+    main()
