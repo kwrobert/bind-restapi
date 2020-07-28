@@ -4,7 +4,7 @@ import sys
 import shlex
 from tornado.ioloop import IOLoop
 from tornado.web import url, RequestHandler, Application
-from tornado.options import define, options
+from tornado.options import define, options, parse_command_line, parse_config_file
 from subprocess import Popen, PIPE, STDOUT
 
 # curl -X DELETE -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com"}' http://localhost:9999/dns
@@ -19,7 +19,7 @@ define('port', default=9999, type=int, help='Listen on port')
 define('logfile', default=os.path.join(cwd, 'bind-restapi.log'), type=str, help='Log file')
 define('ttl', default='8640', type=int, help='Default TTL')
 define('nameserver', default='127.0.0.1', type=str, help='Master DNS')
-define('sig_key', default=os.path.join(cwd, 'dnnsec_key.private'), type=str, help='DNSSEC Key')
+define('sig_key', default=os.path.join(cwd, 'dnssec_key.private'), type=str, help='DNSSEC Key')
 define('secret', default='secret', type=str, help='Protection Header')
 define('nsupdate_command', default='nsupdate', type=str, help='nsupdate')
 
@@ -195,6 +195,10 @@ class DNSApplication(Application):
 
 
 def main():
+    parse_config_file("/etc/bind-api.conf")
+    print(options.as_dict())
+    parse_command_line() 
+    print(options.as_dict())
     app = DNSApplication()
     app.listen(options.port, options.address)
     IOLoop.instance().start()
