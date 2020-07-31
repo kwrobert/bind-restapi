@@ -126,10 +126,10 @@ class MainHandler(ValidationMixin, JsonHandler):
 
     def _nsupdate(self, update):
         """
-        Runs nsupdate command `update` in a suprocess
+        Runs nsupdate command `update` in a subprocess
         """
-        #cmd = '{0} -k {1}'.format(options.nsupdate_command, options.sig_key)
-        cmd = '{0}'.format(options.nsupdate_command)
+        cmd = '{0} -k {1}'.format(options.nsupdate_command, options.sig_key)
+        #cmd = '{0}'.format(options.nsupdate_command)
         print("CMD: {}".format(cmd))
         p = Popen(shlex.split(cmd), stdout=PIPE, stdin=PIPE, stderr=STDOUT)
         print("Update type:")
