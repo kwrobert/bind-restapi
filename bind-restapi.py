@@ -2,10 +2,14 @@ import json
 import os
 import sys
 import shlex
+import ssl
+import logging
 from tornado.ioloop import IOLoop
 from tornado.web import url, RequestHandler, Application
 from tornado.options import define, options, parse_command_line, parse_config_file
+from tornado.httpserver import HTTPServer
 from subprocess import Popen, PIPE, STDOUT
+from tornado.log import LogFormatter
 
 # curl -X DELETE -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com"}' http://localhost:9999/dns
 # curl -X POST -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com", "ip": "1.1.1.10" }' http://localhost:9999/dns
@@ -22,6 +26,8 @@ define('nameserver', default='127.0.0.1', type=str, help='Master DNS')
 define('sig_key', default=os.path.join(cwd, 'dnssec_key.private'), type=str, help='DNSSEC Key')
 define('secret', default='secret', type=str, help='Protection Header')
 define('nsupdate_command', default='nsupdate', type=str, help='nsupdate')
+define('cert_path', default='/etc/ssl/certs/bind-api.pem', type=str, help="Path to cert")
+define('cert_key_path', default='/etc/ssl/private/bind-api-key.pem', type=str, help="Path to cert key")
 
 mandatory_create_parameters = ['ip', 'hostname']
 mandatory_delete_parameters = ['hostname']
@@ -195,12 +201,27 @@ class DNSApplication(Application):
 
 
 def main():
-    parse_config_file("/etc/bind-api.conf")
+    parse_config_file("/etc/bind-api.conf", final=False)
     print(options.as_dict())
-    parse_command_line() 
+    parse_command_line(final=True) 
     print(options.as_dict())
+
+    # Set up logging
+    handler = logging.FileHandler(options.logfile)
+    handler.setFormatter(LogFormatter())
+    for logger_name in ("tornado.access", "tornado.application", "tornado.general"):
+	    logger = logging.getLogger(logger_name)
+	    logger.addHandler(handler)
+	    #logger.setLevel(getattr(logging, options.logging.upper()))
+    # Set up Tornado application
     app = DNSApplication()
-    app.listen(options.port, options.address)
+    ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    ssl_ctx.load_cert_chain(
+        os.path.abspath(options.cert_path),
+        keyfile=os.path.abspath(options.cert_key_path)
+    )
+    server = HTTPServer(app, ssl_options=ssl_ctx)
+    server.listen(options.port, options.address)
     IOLoop.instance().start()
 
     # Multiple processes
