@@ -22,7 +22,7 @@ define('address', default='0.0.0.0', type=str, help='Listen on interface')
 define('port', default=9999, type=int, help='Listen on port')
 define('logfile', default=os.path.join(cwd, 'bind-restapi.log'), type=str, help='Log file')
 define('ttl', default='8640', type=int, help='Default TTL')
-define('nameserver', default='127.0.0.1', type=str, help='Master DNS')
+define('nameserver', default=['127.0.0.1'], type=list, help='List of DNS servers')
 define('sig_key', default=os.path.join(cwd, 'dnssec_key.private'), type=str, help='DNSSEC Key')
 define('secret', default='secret', type=str, help='Protection Header')
 define('nsupdate_command', default='nsupdate', type=str, help='nsupdate')
@@ -49,6 +49,7 @@ update delete {1} PTR
 send\
 '''
 
+app_log = logging.getLogger("tornado.application")
 
 def auth(func):
     """
@@ -155,26 +156,31 @@ class MainHandler(ValidationMixin, JsonHandler):
         if override_ttl:
             ttl = int(override_ttl)
 
-        update = nsupdate_create_template.format(
-            options.nameserver,
-            hostname,
-            ttl,
-            ip)
-
-        if self.request.arguments.get('ptr') == 'yes':
-            reverse_name = reverse_ip(ip)
-            ptr_update = nsupdate_create_ptr.format(
-                reverse_name,
+        for nameserver in options.nameserver:
+            update = nsupdate_create_template.format(
+                nameserver,
+                hostname,
                 ttl,
-                hostname)
-            update += '\n' + ptr_update
+                ip)
 
-        print("Update string:")
-        print(update)
-        return_code, stdout = self._nsupdate(update)
-        if return_code != 0:
-            self.send_error(500, message=stdout)
-        self.send_error(200, message='Record created')
+            if self.request.arguments.get('ptr') == 'yes':
+                reverse_name = reverse_ip(ip)
+                ptr_update = nsupdate_create_ptr.format(
+                    reverse_name,
+                    ttl,
+                    hostname)
+                update += '\n' + ptr_update
+
+            return_code, stdout = self._nsupdate(update)
+            if return_code != 0:
+                msg = f"Unable to create record on nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
+                app_log.error(msg)
+                self.send_error(500, message=stdout)
+            else:
+                self.send_error(200, message='Record created')
+                break
+        else:
+            app_log.error(f"Unable to create record using any of the provided nameservers: {options.nameserver}")
 
     @auth
     def delete(self):
@@ -182,13 +188,20 @@ class MainHandler(ValidationMixin, JsonHandler):
 
         hostname = self.request.arguments['hostname']
 
-        update = nsupdate_delete_template.format(
-            options.nameserver,
-            hostname)
-        return_code, stdout = self._nsupdate(update)
-        if return_code != 0:
-            self.send_error(500, message=stdout)
-        self.send_error(200, message='Record deleted')
+        for nameserver in options.nameserver:
+            update = nsupdate_delete_template.format(
+                nameserver,
+                hostname)
+            return_code, stdout = self._nsupdate(update)
+            if return_code != 0:
+                msg = f"Unable to update nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
+                app_log.error(msg)
+                self.send_error(500, message=stdout)
+            else:
+                self.send_error(200, message='Record deleted')
+                break
+        else:
+            app_log.error(f"Unable to delete record on using any of the provided nameservers: {options.nameserver}")
 
 
 class DNSApplication(Application):
@@ -210,9 +223,9 @@ def main():
     handler = logging.FileHandler(options.logfile)
     handler.setFormatter(LogFormatter())
     for logger_name in ("tornado.access", "tornado.application", "tornado.general"):
-	    logger = logging.getLogger(logger_name)
-	    logger.addHandler(handler)
-	    #logger.setLevel(getattr(logging, options.logging.upper()))
+        logger = logging.getLogger(logger_name)
+        logger.addHandler(handler)
+        #logger.setLevel(getattr(logging, options.logging.upper()))
     # Set up Tornado application
     app = DNSApplication()
     ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
