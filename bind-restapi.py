@@ -44,8 +44,11 @@ send\
 nsupdate_delete_template = '''\
 server {0}
 update delete {1} A
-send
-update delete {1} PTR
+send\
+'''
+
+nsupdate_delete_ptr = '''\
+update delete {0} PTR
 send\
 '''
 
@@ -192,6 +195,12 @@ class MainHandler(ValidationMixin, JsonHandler):
             update = nsupdate_delete_template.format(
                 nameserver,
                 hostname)
+            if self.request.arguments.get('ip'):
+                reverse_name = reverse_ip(self.request.arguments.get('ip'))
+                ptr_update = nsupdate_delete_ptr.format(reverse_name)
+                update += '\n' + ptr_update
+            print("Delete script:")
+            print(update)
             return_code, stdout = self._nsupdate(update)
             if return_code != 0:
                 msg = f"Unable to update nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
