@@ -7,5 +7,5 @@ After=network.service
 [Service]
 
 Type=simple
-ExecStart=/usr/bin/python3 /software/bind-restapi/bind-restapi.py
+ExecStart=/usr/bin/python3 /usr/local/bin/bind-restapi.py
 Restart=always
