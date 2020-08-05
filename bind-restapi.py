@@ -5,7 +5,7 @@ import shlex
 import ssl
 import logging
 from tornado.ioloop import IOLoop
-from tornado.web import url, RequestHandler, Application
+from tornado.web import url, RequestHandler, Application, Finish
 from tornado.options import define, options, parse_command_line, parse_config_file
 from tornado.httpserver import HTTPServer
 from subprocess import Popen, PIPE, STDOUT
@@ -62,7 +62,7 @@ def auth(func):
         secret_header = self.request.headers.get('X-Api-Key', None)
         if not secret_header or not options.secret == secret_header:
             self.send_error(401, message='X-Api-Key not correct')
-
+            raise Finish()
         return func(self, *args, **kwargs)
     return header_check
 
@@ -91,6 +91,7 @@ class JsonHandler(RequestHandler):
             except ValueError:
                 message = 'Unable to parse JSON.'
                 self.send_error(400, message=message) # Bad Request
+                raise Finish()
 
     def set_default_headers(self):
         self.set_header('Content-Type', 'application/json')
@@ -103,7 +104,6 @@ class JsonHandler(RequestHandler):
         reason = self._reason
         if 'message' in kwargs:
             reason = kwargs['message']
-
         self.finish(json.dumps({'code': status_code, 'message': reason}))
 
 
@@ -130,6 +130,7 @@ class ValidationMixin():
         for parameter in params:
             if parameter not in self.request.arguments:
                 self.send_error(400, message='Parameter %s not found' % parameter)
+                raise Finish()
 
 
 class MainHandler(ValidationMixin, JsonHandler):
@@ -159,6 +160,7 @@ class MainHandler(ValidationMixin, JsonHandler):
         if override_ttl:
             ttl = int(override_ttl)
 
+        error_msg = ""
         for nameserver in options.nameserver:
             update = nsupdate_create_template.format(
                 nameserver,
@@ -178,12 +180,15 @@ class MainHandler(ValidationMixin, JsonHandler):
             if return_code != 0:
                 msg = f"Unable to create record on nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
                 app_log.error(msg)
-                self.send_error(500, message=stdout)
+                error_msg += msg
             else:
                 self.send_error(200, message='Record created')
                 break
         else:
-            app_log.error(f"Unable to create record using any of the provided nameservers: {options.nameserver}")
+            msg = f"Unable to create record using any of the provided nameservers: {options.nameserver}"
+            app_log.error(msg)
+            app_log.error(error_msg)
+            self.send_error(500, message=msg+error_msg)
 
     @auth
     def delete(self):
@@ -191,6 +196,7 @@ class MainHandler(ValidationMixin, JsonHandler):
 
         hostname = self.request.arguments['hostname']
 
+        error_msg = ""
         for nameserver in options.nameserver:
             update = nsupdate_delete_template.format(
                 nameserver,
@@ -205,12 +211,15 @@ class MainHandler(ValidationMixin, JsonHandler):
             if return_code != 0:
                 msg = f"Unable to update nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
                 app_log.error(msg)
-                self.send_error(500, message=stdout)
+                error_msg += msg
             else:
                 self.send_error(200, message='Record deleted')
                 break
         else:
-            app_log.error(f"Unable to delete record on using any of the provided nameservers: {options.nameserver}")
+            msg = f"Unable to delete record using any of the provided nameservers: {options.nameserver}"
+            app_log.error(msg)
+            app_log.error(error_msg)
+            self.send_error(500, message=msg+error_msg)
 
 
 class DNSApplication(Application):
