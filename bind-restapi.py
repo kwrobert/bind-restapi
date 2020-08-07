@@ -52,6 +52,12 @@ update delete {0} PTR
 send\
 '''
 
+nsupdate_create_cname_template = '''\
+server {0}
+update add {1} {2} PTR {3}
+send\
+'''
+
 app_log = logging.getLogger("tornado.application")
 
 def auth(func):
@@ -153,18 +159,20 @@ class MainHandler(ValidationMixin, JsonHandler):
         self.validate_params(mandatory_create_parameters)
 
         ip = self.request.arguments['ip']
-        hostname = self.request.arguments['hostname']
+        fqdn = self.request.arguments['hostname']
 
         ttl = options.ttl
         override_ttl = self.request.arguments.get('ttl')
         if override_ttl:
             ttl = int(override_ttl)
 
+        search_domain = self.request.arguments.get('search_domain', None)
+
         error_msg = ""
         for nameserver in options.nameserver:
             update = nsupdate_create_template.format(
                 nameserver,
-                hostname,
+                fqdn,
                 ttl,
                 ip)
 
@@ -173,17 +181,29 @@ class MainHandler(ValidationMixin, JsonHandler):
                 ptr_update = nsupdate_create_ptr.format(
                     reverse_name,
                     ttl,
-                    hostname)
+                    fqdn)
                 update += '\n' + ptr_update
 
             return_code, stdout = self._nsupdate(update)
             if return_code != 0:
-                msg = f"Unable to create record on nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
+                msg = f"Unable to create A and/or PTR record on nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
                 app_log.error(msg)
                 error_msg += msg
-            else:
-                self.send_error(200, message='Record created')
-                break
+                continue
+
+            if search_domain:
+                hostname = get_host_from_fqdn(fqdn)
+                search_fqdn = hostname + "." + search_domain
+                cname_update = nsupdate_create_cname_template.format(nameserver,
+                        search_fqdn, ttl, fqdn)
+                return_code, stdout = self._nsupdate(cname_update)
+                if return_code != 0:
+                    msg = f"Unable to create CNAME record on nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
+                    app_log.error(msg)
+                    error_msg += msg
+                    continue
+            self.send_error(200, message='Record created')
+            break
         else:
             msg = f"Unable to create record using any of the provided nameservers: {options.nameserver}"
             app_log.error(msg)
