@@ -172,8 +172,9 @@ class MainHandler(ValidationMixin, JsonHandler):
         """
         Runs nsupdate command `update` in a subprocess
         """
+        app_log.debug(f"nsupdate script: {update}")
         cmd = "{0} -k {1}".format(options.nsupdate_command, options.sig_key)
-        # cmd = '{0}'.format(options.nsupdate_command)
+        app_log.debug(f"nsupdate cmd: {cmd}")
         print("CMD: {}".format(cmd))
         p = Popen(shlex.split(cmd), stdout=PIPE, stdin=PIPE, stderr=STDOUT)
         print("Update type:")
@@ -244,8 +245,6 @@ class MainHandler(ValidationMixin, JsonHandler):
                 cname = host + "." + options.search_domain.strip(".")
                 cname_update = nsupdate_delete_cname.format(cname, hostname)
                 update += "\n" + cname_update
-            print("Delete script:")
-            print(update)
             return_code, stdout = self._nsupdate(update)
             if return_code != 0:
                 msg = f"Unable to update nameserver {nameserver}.\nReturncode: {return_code}\nMsg: {stdout}"
@@ -278,7 +277,8 @@ def main():
     for logger_name in ("tornado.access", "tornado.application", "tornado.general"):
         logger = logging.getLogger(logger_name)
         logger.addHandler(handler)
-        # logger.setLevel(getattr(logging, options.logging.upper()))
+        if options.logging is not None:
+            logger.setLevel(getattr(logging, options.logging.upper()))
     # Set up Tornado application
     app = DNSApplication()
     ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
