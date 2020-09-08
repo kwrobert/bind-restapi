@@ -1,5 +1,4 @@
 #!/bin/bash
-DOMAIN=mathworks.com
 
 yum install -y python3-pip bind-utils
 

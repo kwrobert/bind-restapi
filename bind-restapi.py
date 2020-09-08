@@ -1,3 +1,15 @@
+"""
+Author: Kyle Robertson
+Contact: kyle.robertson@wei.com
+Date: 9/8/2020
+Description:
+    This file defines code for a RESTful API server using the Tornado web framework that
+    allows a user to create and delete A, PTR, and CNAME records within BIND DNS
+    infrastructure by making HTTP(S) requests against this server. The server translates
+    the parameters of the users request and uses nsupdate under the hood to make the
+    actual DNS modifications. The server in it's entirety can by run with `python3 bind-restapi.py` 
+"""
+
 import json
 import os
 import sys
@@ -10,10 +22,6 @@ from tornado.options import define, options, parse_command_line, parse_config_fi
 from tornado.httpserver import HTTPServer
 from subprocess import Popen, PIPE, STDOUT
 from tornado.log import LogFormatter
-
-# curl -X DELETE -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com"}' http://localhost:9999/dns
-# curl -X POST -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com", "ip": "1.1.1.10" }' http://localhost:9999/dns
-# curl -X POST -H 'Content-Type: application/json' -H 'X-Api-Key: secret' -d '{ "hostname": "host.example.com", "ip": "1.1.1.10", "ptr": "yes", "ttl": 86400}' http://localhost:9999/dns
 
 cwd = os.path.dirname(os.path.realpath(__file__))
 
@@ -49,11 +57,13 @@ define(
     help="Domain in which to create search helper CNAME records. Don't include leading dot",
 )
 
-# mandatory_create_parameters = [["ip", "hostname"]]
-# mandatory_delete_parameters = [["hostname"], ["ip"], ["hostname", "ip"]]
+# Mandatory parameters that must be present in the incoming JSON body of create (POST)
+# and delete (DELETE) requests
 mandatory_create_parameters = ["ip", "hostname"]
 mandatory_delete_parameters = ["ip", "hostname"]
 
+# Templates for nsupdate scripts executed by the server. Parameters in curly brackets
+# will be filled in when template is rendered
 nsupdate_create_template = """\
 update add {0} {1} A {2}
 send\
@@ -88,7 +98,8 @@ app_log = logging.getLogger("tornado.application")
 
 def auth(func):
     """
-    Decorator to check headers for API key and authorized incoming requests
+    Decorator to check headers for API key and authorize incoming requests. This should
+    wrap all HTTP handler methods in the MainHandler class.
     """
 
     def header_check(self, *args, **kwargs):
@@ -102,6 +113,9 @@ def auth(func):
 
 
 def reverse_ip(ip):
+    """
+    Creates the reverse lookup record name given an IP address
+    """
     return ".".join(reversed(ip.split("."))) + ".in-addr.arpa"
 
 
@@ -172,6 +186,7 @@ class MainHandler(ValidationMixin, JsonHandler):
         """
         Runs nsupdate command `update` in a subprocess
         """
+
         app_log.debug(f"nsupdate script: {update}")
         cmd = "{0} -k {1}".format(options.nsupdate_command, options.sig_key)
         app_log.debug(f"nsupdate cmd: {cmd}")
@@ -184,25 +199,28 @@ class MainHandler(ValidationMixin, JsonHandler):
 
     @auth
     def post(self):
+        """
+        Creates DNS records for authorized POST requests.
+        """
+        # Validate we have correct parameters in request body
         self.validate_params(mandatory_create_parameters)
-
+        # Extract parameters
         ip = self.request.arguments["ip"]
         hostname = self.request.arguments["hostname"]
-
         ttl = options.ttl
         override_ttl = self.request.arguments.get("ttl")
         if override_ttl:
             ttl = int(override_ttl)
-
+        # Loop through nameservers in config file
         error_msg = ""
         for nameserver in options.nameserver:
             update = nsupdate_create_template.format(hostname, ttl, ip)
-
+            # Create PTR records if asked
             if self.request.arguments.get("ptr") == "yes":
                 reverse_name = reverse_ip(ip)
                 ptr_update = nsupdate_create_ptr.format(reverse_name, ttl, hostname)
                 update += "\n" + ptr_update
-
+            # Create search helper records if asked
             host, domain = hostname.split(".", 1)
             if (
                 self.request.arguments.get("search_cname") == "yes"
@@ -262,6 +280,8 @@ class MainHandler(ValidationMixin, JsonHandler):
 
 class DNSApplication(Application):
     def __init__(self):
+        # Sets up handler classes for each allowed route. 
+        # Structure should be a list of url objects whose arguents are:
         # (regex for matching route, RequestHandler object, args for RequestHandler.initialize)
         handlers = [url(r"/dns", MainHandler)]
         Application.__init__(self, handlers)
@@ -290,7 +310,7 @@ def main():
     server.listen(options.port, options.address)
     IOLoop.instance().start()
 
-    # Multiple processes
+    # Run multiple instances of the application in multiple processes
     # app = DNSApplication()
     # server = tornado.httpserver.HTTPServer(app)
     # server.bind(8888)
