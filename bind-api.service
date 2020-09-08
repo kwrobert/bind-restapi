@@ -9,3 +9,7 @@ After=network.service
 Type=simple
 ExecStart=/usr/bin/python3 /usr/local/bin/bind-restapi.py
 Restart=always
+
+[Install]
+
+WantedBy=multi-user.target
